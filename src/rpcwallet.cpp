@@ -90,7 +90,11 @@ Value getinfo(const Array& params, bool fHelp)
     obj.push_back(Pair("stake",         ValueFromAmount(pwalletMain->GetStake())));
     obj.push_back(Pair("blocks",        (int)nBestHeight));
     obj.push_back(Pair("timeoffset",    (boost::int64_t)GetTimeOffset()));
-    obj.push_back(Pair("moneysupply",   ValueFromAmount(pindexBest->nMoneySupply)));
+
+    // moneysupply: 948414.03505679 MIS must be burned by Binpool after ends of PoW stage,that amount of coins not be send to miners addresses more that 9 months in a row and hold on that address:
+    // Mp8Q8kFW2HifnnUV8oBBCtKHTKKRuYm5U5
+    obj.push_back(Pair("moneysupply",   ValueFromAmount(pindexBest->nMoneySupply - 948414.03505679 * COIN)));
+
     obj.push_back(Pair("connections",   (int)vNodes.size()));
     obj.push_back(Pair("proxy",         (proxy.first.IsValid() ? proxy.first.ToStringIPPort() : string())));
     obj.push_back(Pair("ip",            addrSeenByPeer.ToStringIP()));
