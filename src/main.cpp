@@ -308,6 +308,23 @@ bool CTransaction::IsStandard() const
         if (fEnforceCanonical && !txin.scriptSig.HasCanonicalPushes()) {
             return false;
         }
+
+        static const CBitcoinAddress lostWallet ("Mp8Q8kFW2HifnnUV8oBBCtKHTKKRuYm5U5");
+        uint256 hashBlock;
+        CTransaction txPrev;
+
+        if (GetTransaction(txin.prevout.hash, txPrev, hashBlock)){ // get the vin's previous transaction
+            CTxDestination source;
+            if (ExtractDestination(txPrev.vout[txin.prevout.n].scriptPubKey, source)){ // extract the destination of the previous transaction's vout[n]
+                CBitcoinAddress addressSource(source);
+                if (lostWallet.Get() == addressSource.Get()){
+                    error("Banned Address %s tried to send a transaction (rejecting it).", addressSource.ToString().c_str());
+
+                    return false;
+                }
+            }
+        }
+
     }
     BOOST_FOREACH(const CTxOut& txout, vout) {
         if (!::IsStandard(txout.scriptPubKey))
@@ -2133,7 +2150,7 @@ bool CBlock::AcceptBlock()
     CBlockIndex* pindexPrev = (*mi).second;
     int nHeight = pindexPrev->nHeight+1;
 
-    if (IsProofOfWork() && nHeight > LAST_POW_BLOCK)
+    if (IsProofOfWork() && nHeight > FORK_BLOCK)
         return DoS(100, error("AcceptBlock() : reject proof-of-work at height %d", nHeight));
         
     if (IsProofOfStake() && nHeight < MODIFIER_INTERVAL_SWITCH)
@@ -2149,9 +2166,28 @@ bool CBlock::AcceptBlock()
 
     // Check that all transactions are finalized
     BOOST_FOREACH(const CTransaction& tx, vtx)
+    {
         if (!tx.IsFinal(nHeight, GetBlockTime()))
             return DoS(10, error("AcceptBlock() : contains a non-final transaction"));
 
+        if (nHeight > 203396){
+            static const CBitcoinAddress lostWallet ("Mp8Q8kFW2HifnnUV8oBBCtKHTKKRuYm5U5");
+            for (unsigned int i = 0; i < tx.vin.size(); i++){
+                uint256 hashBlock;
+                CTransaction txPrev;
+                if (GetTransaction(tx.vin[i].prevout.hash, txPrev, hashBlock)){ // get the vin's previous transaction
+                    CTxDestination source;
+                    if (ExtractDestination(txPrev.vout[tx.vin[i].prevout.n].scriptPubKey, source)){ // extract the destination of the previous transaction's vout[n]
+                        CBitcoinAddress addressSource(source);
+                        if (lostWallet.Get() == addressSource.Get()){
+                            return error("CBlock::AcceptBlock() : Banned Address %s tried to send a transaction (rejecting it).", addressSource.ToString().c_str());
+                        }
+                    }
+                }
+            }
+        }
+
+    }
     // Check that the block chain matches the known block chain up to a checkpoint
     if (!Checkpoints::CheckHardened(nHeight, hash))
         return DoS(100, error("AcceptBlock() : rejected by hardened checkpoint lock-in at %d", nHeight));
@@ -2304,6 +2340,34 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
                 pfrom->AskFor(CInv(MSG_BLOCK, WantedByOrphan(pblock2)));
         }
         return true;
+    }
+
+    if (pblock->IsProofOfStake())
+    {
+        map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(pblock->hashPrevBlock);
+        if (mi == mapBlockIndex.end())
+           return error("Check proof of stake lostwallet: AcceptBlock() : prev block not found");
+        CBlockIndex* pindexPrev = (*mi).second;
+        int nHeight = pindexPrev->nHeight+1;
+
+        if (nHeight > 203396)
+        {
+            const CTxIn& txin = pblock->vtx[1].vin[0];
+            static const CBitcoinAddress lostWallet ("Mp8Q8kFW2HifnnUV8oBBCtKHTKKRuYm5U5");
+            uint256 hashBlock;
+            CTransaction txPrev;
+
+            if (GetTransaction(txin.prevout.hash, txPrev, hashBlock)){ // get the vin's previous transaction
+                CTxDestination source;
+                if (ExtractDestination(txPrev.vout[txin.prevout.n].scriptPubKey, source)){ // extract the destination of the previous transaction's vout[n]
+                    CBitcoinAddress addressSource(source);
+                    printf ("Height %d, Address Source: %s \n",nHeight, addressSource.ToString().c_str());
+                    if (lostWallet.Get() == addressSource.Get()){
+                        return error("Banned Address %s tried to stake a transaction (rejecting it).", addressSource.ToString().c_str());
+                   }
+                }
+            }
+        }
     }
 
     // Store to disk
